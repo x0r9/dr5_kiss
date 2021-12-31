@@ -206,9 +206,10 @@ class TCPKISS(KISS):
 
     """KISS TCP Class."""
 
-    def __init__(self, host, port, strip_df_start=False):
+    def __init__(self, host, port, strip_df_start=False, timeout=None):
         self.address = (host, int(port))
         self.strip_df_start = strip_df_start
+        self.timeout = timeout
         super(TCPKISS, self).__init__(strip_df_start)
 
     def _read_handler(self, read_bytes=None):
@@ -228,6 +229,7 @@ class TCPKISS(KISS):
         self.interface = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._logger.debug('Conntecting to %s', self.address)
         self.interface.connect(self.address)
+        self.interface.settimeout(self.timeout)
         self._logger.info('Connected to %s', self.address)
         self._write_handler = self.interface.send
 

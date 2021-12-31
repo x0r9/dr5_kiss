@@ -16,6 +16,7 @@
 .pt
 .vagrant/
 RELEASE-VERSION.txt
+venv/
 build/
 cover/
 dist/
