@@ -289,6 +289,12 @@ class TCPAsyncKISS(KISS):
         self.timeout = timeout
         super().__init__(strip_df_start)
 
+    async def _read_handler_sync(self, read_bytes=None):
+        read_bytes = read_bytes or kiss.READ_BYTES
+        read_data = await self.interface.recv(read_bytes)
+        self._logger.debug('len(read_data)=%s', len(read_data))
+        return read_data    
+
 class SerialKISS(KISS):
 
     """KISS Serial Class."""
