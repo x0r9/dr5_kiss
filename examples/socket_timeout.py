@@ -9,6 +9,7 @@ Use the TCP timeout option to time out and handle other tasks
 
 import sys
 import socket
+import time
 
 sys.path.append("..")
 
@@ -18,7 +19,7 @@ def print_frame(frame):
     print(f"Rx frame: {frame}")
 
 def main():
-    ki = kiss.TCPKISS(host='localhost', port=8001, timeout=10.0)
+    ki = kiss.TCPKISS(host='localhost', port=8001, timeout=0)
     ki.start()
     timeout_counter = 0
     while True:
@@ -28,6 +29,9 @@ def main():
             print(f"timeout.. {timeout_counter}")
             timeout_counter += 1
             pass
+        except BlockingIOError as e:
+            print("resource temp unavail")
+            time.sleep(1)
 
 
 

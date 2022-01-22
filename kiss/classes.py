@@ -89,6 +89,76 @@ class KISS(object):
             ])
         )
 
+
+    def readdata_into_frames(self, read_data):
+        """
+        Convert data from KISS device into RX frames
+
+        :param read_data: Bytes received from KISS interface
+        :type read_data: bytes
+
+        :return: List of Frames
+        :rtype: list
+        """
+
+        frames = []
+        read_buffer = bytes()
+        split_data = read_data.split(kiss.FEND)
+        fends = len(split_data)
+
+        self._logger.debug(
+            'split_data(fends=%s)="%s"', fends, split_data)
+
+        # Handle NMEAPASS on T3-Micro
+        if len(read_data) >= 900:
+            if kiss.NMEA_HEADER in read_data and '\r\n' in read_data:
+                return [read_data]
+
+        # No FEND in frame
+        if fends == 1:
+            read_buffer += split_data[0]
+        # Single FEND in frame
+        elif fends == 2:
+            # Closing FEND found
+            if split_data[0]:
+                # Partial frame continued, otherwise drop
+                frames.append(b''.join([read_buffer, split_data[0]]))
+                read_buffer = bytes()
+            # Opening FEND found
+            else:
+                frames.append(read_buffer)
+                read_buffer = split_data[1]
+
+        # At least one complete frame received: [FEND, xxx, FEND]
+        elif fends >= 3:
+
+            # Iterate through split_data and extract just the frames.
+            for i in range(0, fends - 1):
+                buf = bytearray(b''.join([read_buffer, split_data[i]]))
+                self._logger.debug('i=%s buf="%s"', i, buf)
+                if buf:
+                    self._logger.debug('Frame Found: "%s"', buf)
+                    frames.append(buf)
+                    read_buffer = bytearray()
+
+            # TODO: What do I do?
+            if split_data[fends - 1]:
+                self._logger.debug('Mystery Conditional')
+                read_buffer = bytearray(split_data[fends - 1])
+
+        # Fixup T3-Micro NMEA Sentences
+        frames = list(map(kiss.strip_nmea, frames))
+        # Remove None frames.
+        frames = [_f for _f in frames if _f]
+
+        # Maybe.
+        frames = list(map(kiss.recover_special_codes, frames))
+
+        if self.strip_df_start:
+            frames = list(map(kiss.strip_df_start, frames))
+
+        return frames
+
     def read(self, read_bytes=None, callback=None, readmode=True):  # NOQA pylint: disable=R0912
         """
         Reads data from KISS device.
@@ -104,7 +174,7 @@ class KISS(object):
             'read_bytes=%s callback="%s" readmode=%s',
             read_bytes, callback, readmode)
 
-        read_buffer = bytes()
+        
 
         while 1:
             read_data = self._read_handler(read_bytes)
@@ -113,64 +183,39 @@ class KISS(object):
                 self._logger.debug(
                     'read_data(%s)="%s"', len(read_data), read_data)
 
-                frames = []
+                frames = self.readdata_into_frames(read_data)
 
-                split_data = read_data.split(kiss.FEND)
-                fends = len(split_data)
+                if readmode:
+                    for frame in frames:
+                        callback(frame)
+                elif not readmode:
+                    return frames
 
+    async def read_async(self, read_bytes=None, callback=None, readmode=True):
+        """
+        Reads data from KISS device. using async/await
+
+        :param callback: Callback to call with decoded data.
+        :param readmode: If False, immediately returns frames.
+        :type callback: func
+        :type readmode: bool
+        :return: List of frames (if readmode=False).
+        :rtype: list
+        """
+        self._logger.debug(
+            'read_bytes=%s callback="%s" readmode=%s',
+            read_bytes, callback, readmode)
+
+        read_buffer = bytes()
+
+        while 1:
+            read_data = await self._read_handler_async(read_bytes)
+
+            if read_data is not None and len(read_data):
                 self._logger.debug(
-                    'split_data(fends=%s)="%s"', fends, split_data)
+                    'read_data(%s)="%s"', len(read_data), read_data)
 
-                # Handle NMEAPASS on T3-Micro
-                if len(read_data) >= 900:
-                    if kiss.NMEA_HEADER in read_data and '\r\n' in read_data:
-                        if callback:
-                            callback(read_data)
-                        elif not readmode:
-                            return [read_data]
-
-                # No FEND in frame
-                if fends == 1:
-                    read_buffer += split_data[0]
-                # Single FEND in frame
-                elif fends == 2:
-                    # Closing FEND found
-                    if split_data[0]:
-                        # Partial frame continued, otherwise drop
-                        frames.append(b''.join([read_buffer, split_data[0]]))
-                        read_buffer = bytes()
-                    # Opening FEND found
-                    else:
-                        frames.append(read_buffer)
-                        read_buffer = split_data[1]
-
-                # At least one complete frame received: [FEND, xxx, FEND]
-                elif fends >= 3:
-
-                    # Iterate through split_data and extract just the frames.
-                    for i in range(0, fends - 1):
-                        buf = bytearray(b''.join([read_buffer, split_data[i]]))
-                        self._logger.debug('i=%s buf="%s"', i, buf)
-                        if buf:
-                            self._logger.debug('Frame Found: "%s"', buf)
-                            frames.append(buf)
-                            read_buffer = bytearray()
-
-                    # TODO: What do I do?
-                    if split_data[fends - 1]:
-                        self._logger.debug('Mystery Conditional')
-                        read_buffer = bytearray(split_data[fends - 1])
-
-                # Fixup T3-Micro NMEA Sentences
-                frames = list(map(kiss.strip_nmea, frames))
-                # Remove None frames.
-                frames = [_f for _f in frames if _f]
-
-                # Maybe.
-                frames = list(map(kiss.recover_special_codes, frames))
-
-                if self.strip_df_start:
-                    frames = list(map(kiss.strip_df_start, frames))
+                frames = self.readdata_into_frames(read_data)
 
                 if readmode:
                     for frame in frames:
@@ -233,6 +278,16 @@ class TCPKISS(KISS):
         self._logger.info('Connected to %s', self.address)
         self._write_handler = self.interface.send
 
+
+class TCPAsyncKISS(KISS):
+
+    """KISS TCP client using async_io await/async methods"""
+
+    def __init__(self, host, port, timeout=None, strip_df_start=False) -> None:
+        self.address = (host, int(port))
+        self.strip_df_start = strip_df_start
+        self.timeout = timeout
+        super().__init__(strip_df_start)
 
 class SerialKISS(KISS):
 
