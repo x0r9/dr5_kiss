@@ -5,8 +5,10 @@
 
 import logging
 import socket
+import asyncio
 
 import serial
+
 
 import kiss
 
@@ -47,7 +49,19 @@ class KISS(object):
         """
         read_bytes = read_bytes or kiss.READ_BYTES
 
+    async def _read_handler_async(self, read_bytes=None):  # pylint: disable=R0201
+        """
+        Helper method to call when reading from KISS interface. with async/await
+        """
+        read_bytes = read_bytes or kiss.READ_BYTES
+
     def _write_handler(self, frame=None):  # pylint: disable=R0201
+        """
+        Helper method to call when writing to KISS interface.
+        """
+        del frame
+
+    async def _write_handler_async(self, frame=None):  # pylint: disable=R0201
         """
         Helper method to call when writing to KISS interface.
         """
@@ -60,6 +74,12 @@ class KISS(object):
         pass
 
     def start(self, **kwargs):
+        """
+        Helper method to call when starting KISS interface.
+        """
+        pass
+
+    async def start_async(self, **kwargs):
         """
         Helper method to call when starting KISS interface.
         """
@@ -284,16 +304,39 @@ class TCPAsyncKISS(KISS):
     """KISS TCP client using async_io await/async methods"""
 
     def __init__(self, host, port, timeout=None, strip_df_start=False) -> None:
-        self.address = (host, int(port))
+        self.address_host = host
+        self.address_port =  int(port)
         self.strip_df_start = strip_df_start
         self.timeout = timeout
+        self.async_reader = None
+        self.async_writer = None
         super().__init__(strip_df_start)
 
-    async def _read_handler_sync(self, read_bytes=None):
+    async def _read_handler_async(self, read_bytes=None):
         read_bytes = read_bytes or kiss.READ_BYTES
-        read_data = await self.interface.recv(read_bytes)
-        self._logger.debug('len(read_data)=%s', len(read_data))
+
+      
+        if self.timeout is not None:
+            data = await asyncio.wait_for(self.async_reader.read(read_bytes),timeout=self.timeout)
+        else:
+            data = await self.async_reader.read(read_bytes)
+
+        print(f"data: {data}")
+
+
+
+        read_data = await self.async_reader.read(read_bytes)
+        self._logger.debug(f'len(read_data)={len(read_data)}')
         return read_data    
+
+    async def start_async(self, **kwargs):
+        self._logger.debug(f'Conntecting to {self.address_host}:{self.address_port}')
+
+        self.async_reader, self.async_writer = await asyncio.open_connection(
+                self.address_host, self.address_port)
+
+        self._logger.info(f'Connected to {self.address_host}:{self.address_port}')
+        return await super().start_async(**kwargs)
 
 class SerialKISS(KISS):
 
